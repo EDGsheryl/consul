@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -298,6 +299,12 @@ func (c *cmd) generateConfig() ([]byte, error) {
 
 		// Override cluster now we know the actual service name
 		args.ProxyCluster = svc.Proxy.DestinationServiceName
+		args.StaticListenersJSON = infraListeners
+
+		if svc.Proxy.LocalServiceAddress != "" && svc.Proxy.LocalServicePort != 0 {
+			reg, _ := regexp.Compile("TARGET_PORT")
+			args.StaticClustersJSON = string(reg.ReplaceAllString(infraCluster, strconv.Itoa(svc.Proxy.LocalServicePort)))
+		}
 	}
 
 	return bsCfg.GenerateJSON(args)
@@ -339,4 +346,105 @@ Usage: consul connect envoy [options]
 
     $ consul connect envoy -sidecar-for web
 
+`
+const infraListeners = `
+{
+  "address": {
+    "socket_address": {
+      "address": "0.0.0.0",
+      "port_value": 80
+    }
+  },
+  "filter_chains": {
+    "filters": [
+      {
+        "name": "envoy.http_connection_manager",
+        "config": {
+          "stat_prefix": "ingress_http",
+          "http_filters": [
+            {
+              "name": "envoy.router",
+              "config": {}
+            }
+          ],
+          "route_config": {
+            "virtual_hosts": [
+              {
+                "name": "infra-http",
+                "domains": "*",
+                "routes": [
+                  {
+                    "route": {
+                      "cluster": "banana"
+                    },
+                    "match": {
+                      "prefix": "/"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+},
+{
+  "address": {
+    "socket_address": {
+      "address": "0.0.0.0",
+      "port_value": 443
+    }
+  },
+  "filter_chains": {
+    "filters": [
+      {
+        "name": "envoy.http_connection_manager",
+        "config": {
+          "stat_prefix": "ingress_http",
+          "http_filters": [
+            {
+              "name": "envoy.router",
+              "config": {}
+            }
+          ],
+          "route_config": {
+            "virtual_hosts": [
+              {
+                "name": "infra-http",
+                "domains": "*",
+                "routes": [
+                  {
+                    "route": {
+                      "cluster": "banana"
+                    },
+                    "match": {
+                      "prefix": "/"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
+`
+const infraCluster = `
+{
+  "name": "banana",
+  "type": "STRICT_DNS",
+  "connect_timeout": "1s",
+  "hosts": [
+    {
+      "socket_address": {
+        "address": "127.0.0.1",
+        "port_value": TARGET_PORT
+      }
+    }
+  ]
+}
 `
